@@ -84,8 +84,13 @@ def admin_keyboard():
     k.row("⬅️ Main menu")
     return k
 
+# User based channel filtering
 def inline_channels(uid, action):
-    rows=db("SELECT chat_id,title,username FROM channels ORDER BY title", fetch=True)
+    if is_admin(uid):
+        rows=db("SELECT chat_id,title,username FROM channels ORDER BY title", fetch=True)
+    else:
+        rows=db("SELECT chat_id,title,username FROM channels WHERE added_by=:uid ORDER BY title", {"uid": uid}, fetch=True)
+    
     k=types.InlineKeyboardMarkup()
     for r in rows:
         label=(r["title"] or str(r["chat_id"]))[:50]
@@ -95,8 +100,8 @@ def inline_channels(uid, action):
 def send_home(chat_id, uid):
     welcome_text = tr(
         uid,
-        "👋 Welcome to the Bot!\n\nHow to add a channel:\n1. Make this bot Admin in your channel.\n2. Forward ANY post from that channel to this bot OR send channel username (@username).\n\nChoose an option from the keyboard below:",
-        "👋 বটে আপনাকে স্বাগতম!\n\nচ্যানেল যেভাবে যুক্ত করবেন:\n১. বট-কে আপনার চ্যানেলের এডমিন বানান।\n২. চ্যানেল থেকে যেকোনো একটি পোস্ট এই বটে ফরোয়ার্ড করুন অথবা চ্যানেলের ইউজারনেম (@username) লিখে পাঠান।\n\nনিচের কিবোর্ড থেকে অপশন বেছে নিন:"
+        "👋 Welcome to the Bot!\n\nHow to add a channel:\n1. Make this bot Admin in your channel first.\n2. Forward ANY post from that channel to this bot OR send channel username (@username).\n\nChoose an option from the keyboard below:",
+        "👋 বটে আপনাকে স্বাগতম!\n\nচ্যানেল যেভাবে যুক্ত করবেন:\n১. প্রথমে বট-কে আপনার চ্যানেলের এডমিন বানান।\n২. এরপর চ্যানেল থেকে যেকোনো একটি পোস্ট এই বটে ফরোয়ার্ড করুন অথবা চ্যানেলের ইউজারনেম (@username) লিখে পাঠান।\n\nনিচের কিবোর্ড থেকে অপশন বেছে নিন:"
     )
     BOT.send_message(chat_id, welcome_text, reply_markup=main_keyboard(uid))
 
@@ -104,14 +109,14 @@ def register_channel_by_chat_obj(chat_obj, added_by_user_id):
     try:
         bot_member = BOT.get_chat_member(chat_obj.id, BOT.get_me().id)
         if bot_member.status not in ['administrator', 'creator']:
-            return False, "বট এই চ্যানেলের অ্যাডমিন নয়। দয়া করে আগে বটকে চ্যানেলে অ্যাডমিন বানান।"
+            return False, "❌ চ্যানেলটি যুক্ত করা যায়নি!\n\nকারণ: আপনি বটকে এখনো এই চ্যানেলে **এডমিন বানাননি** অথবা বট চ্যানেলের তথ্য পড়তে পারছে না। দয়া করে আগে চ্যানেলে বটকে এডমিন বানান।"
         
         db("""INSERT INTO channels(chat_id,title,username,added_by) VALUES(:id,:t,:u,:by)
-        ON CONFLICT(chat_id) DO UPDATE SET title=EXCLUDED.title,username=EXCLUDED.username""",
-        {"id":chat_obj.id,"t":chat_obj.title,"u":chat_obj.username,"by":added_by_user_id})
-        return True, f"✅ সফলভাবে <b>{chat_obj.title}</b> চ্যানেলটি যুক্ত করা হয়েছে!"
+        ON CONFLICT(chat_id) DO UPDATE SET title=EXCLUDED.title,username=EXCLUDED.username,added_by=EXCLUDED.added_by""",
+        {"id":chat_obj.id,"t":chat_obj.title or "Channel","u":chat_obj.username,"by":added_by_user_id})
+        return True, f"✅ সফলভাবে <b>{chat_obj.title or 'চ্যানেল'}</b> যুক্ত করা হয়েছে!"
     except Exception as e:
-        return False, f"চ্যানেল অ্যাক্সেস করা সম্ভব হয়নি: {str(e)}"
+        return False, f"❌ চ্যানেল যুক্ত করা সম্ভব হয়নি। নিশ্চিত করুন বটকে চ্যানেলে এডমিন বানানো হয়েছে।\n(Technical error: {str(e)})"
 
 @BOT.message_handler(commands=["start"])
 def start(m):
@@ -139,10 +144,11 @@ def start(m):
 @BOT.message_handler(commands=["help"])
 def help_cmd(m):
     uid = m.from_user.id
-    help_text = tr(
-        uid,
-        "<b>Bot Manual & Usage Guide:</b>\n1. Make bot Admin in channel.\n2. Forward a post from channel or send @username here to add channel.\n3. Use keyboard buttons to create photo/text posts with buttons and reactions.",
-        "<b>বট ম্যানুয়াল ও ব্যবহারবিধি:</b>\n১. চ্যানেল-এ বটকে এডমিন বানান।\n২. চ্যানেল থেকে একটি পোস্ট ফরোয়ার্ড করুন বা @username পাঠান।\n৩. ছবি বা লেখা সহ পোস্ট তৈরি, বাটন যুক্ত করা এবং শিডিউল করতে নিচের কিবোর্ড ব্যবহার করুন।"
+    help_text = (
+        "<b>বট ম্যানুয়াল ও ব্যবহারবিধি:</b>\n"
+        "১. চ্যানেল-এ প্রথমে বটকে এডমিন বানান।\n"
+        "২. চ্যানেল থেকে যেকোনো একটি পোস্ট এই বটে ফরোয়ার্ড করুন অথবা চ্যানেলের ইউজারনেম (@username) পাঠান।\n"
+        "৩. ছবি বা লেখা সহ পোস্ট তৈরি, বাটন যুক্ত করা এবং শিডিউল করতে নিচের কিবোর্ড ব্যবহার করুন।"
     )
     BOT.send_message(m.chat.id, help_text, reply_markup=main_keyboard(uid))
 
@@ -155,7 +161,7 @@ def add_channel(m):
             BOT.reply_to(m, msg)
         except Exception as e: BOT.reply_to(m, f"ত্রুটি: {e}")
     else:
-        BOT.reply_to(m, "চ্যানেল যুক্ত করতে চ্যানেলের @username পাঠান অথবা চ্যানেল থেকে যেকোনো একটি পোস্ট ফরোয়ার্ড করুন।")
+        BOT.reply_to(m, "চ্যানেল যুক্ত করতে প্রথমে চ্যানেলে বটকে এডমিন বানান, তারপর চ্যানেল থেকে যেকোনো পোস্ট ফরোয়ার্ড করুন অথবা @username পাঠান।")
 
 @BOT.message_handler(func=lambda m: m.forward_from_chat is not None and m.forward_from_chat.type == 'channel')
 def handle_forwarded_channel_post(m):
@@ -180,7 +186,7 @@ def text_router(m):
         data["photo"] = photo_file_id
         data["body"] = msg_text
         set_state(uid, state + "_buttons", data)
-        BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম | https://example.com\nবাটন না চাইলে NONE লিখুন। একাধিক লাইন দিতে পারেন।")
+        BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম | https://example.com\nবাটন না চাইলে NONE লিখুন।")
         return
 
     if msg_text.startswith("@") or "t.me/" in msg_text:
@@ -203,8 +209,8 @@ def text_router(m):
     if msg_text in ("➕ Add Channel", "➕ চ্যানেল যুক্ত করুন"):
         add_msg = (
             "<b>চ্যানেল যুক্ত করার নিয়ম:</b>\n"
-            "১. বট-কে আপনার চ্যানেলে অ্যাডমিন বানান।\n"
-            "২. চ্যানেল থেকে যেকোনো একটি <b>পোস্ট ফরোয়ার্ড করে এখানে পাঠান</b> অথবা চ্যানেলের ইউজারনেম (যেমন: <code>@channelusername</code>) লিখে পাঠান।"
+            "১. প্রথমে বট-কে আপনার চ্যানেলে <b>অ্যাডমিন</b> বানান।\n"
+            "২. এরপর চ্যানেল থেকে যেকোনো একটি <b>পোস্ট ফরোয়ার্ড করে এখানে পাঠান</b> অথবা চ্যানেলের ইউজারনেম (যেমন: <code>@channelusername</code>) লিখে পাঠান।"
         )
         BOT.send_message(chat_id, add_msg, parse_mode="HTML")
         return
@@ -212,7 +218,7 @@ def text_router(m):
     if msg_text in ("🆘 Help", "🆘 সহায়তা / ম্যানুয়াল", "Help / Manual"):
         help_text = (
             "<b>বট ব্যবহারের নির্দেশিকা:</b>\n"
-            "- চ্যানেল অ্যাড করতে চ্যানেলের পোস্ট ফরোয়ার্ড করুন বা @username পাঠান।\n"
+            "- চ্যানেল অ্যাড করতে প্রথমে চ্যানেলে বটকে এডমিন বানান, তারপর পোস্ট ফরোয়ার্ড করুন বা @username পাঠান।\n"
             "- ছবি বা লেখা দিয়ে পোস্ট তৈরি, বাটন যুক্ত করা এবং শিডিউল করার জন্য কিবোর্ড অপশন ব্যবহার করুন।"
         )
         set_state(uid,"help_message")
@@ -228,17 +234,29 @@ def text_router(m):
         return
 
     if msg_text in ("📣 Channels", "📣 চ্যানেলসমূহ"):
-        BOT.send_message(chat_id, "পরিচালনা করার জন্য একটি চ্যানেল নির্বাচন করুন:", reply_markup=inline_channels(uid,"channel"))
+        k = inline_channels(uid, "channel")
+        if not k.keyboard:
+            BOT.send_message(chat_id, "আপনার কোনো যুক্ত করা চ্যানেল পাওয়া যায়নি। নতুন চ্যানেল যুক্ত করতে ➕ চ্যানেল যুক্ত করুন বাটনে ক্লিক করুন।")
+        else:
+            BOT.send_message(chat_id, "পরিচালনা করার জন্য আপনার একটি চ্যানেল নির্বাচন করুন:", reply_markup=k)
         return
     
     if msg_text in ("📝 Create post", "📝 পোস্ট তৈরি"):
-        set_state(uid,"post_target",{})
-        BOT.send_message(chat_id, "একটি চ্যানেল নির্বাচন করুন:", reply_markup=inline_channels(uid,"target"))
+        k = inline_channels(uid, "target")
+        if not k.keyboard:
+            BOT.send_message(chat_id, "আপনার কোনো যুক্ত করা চ্যানেল পাওয়া যায়নি। আগে একটি চ্যানেল যুক্ত করুন।")
+        else:
+            set_state(uid,"post_target",{})
+            BOT.send_message(chat_id, "পোস্ট করার জন্য আপনার একটি চ্যানেল নির্বাচন করুন:", reply_markup=k)
         return
     
     if msg_text in ("⏰ Schedule post", "⏰ পোস্ট শিডিউল"):
-        set_state(uid,"schedule_target",{})
-        BOT.send_message(chat_id, "একটি চ্যানেল নির্বাচন করুন:", reply_markup=inline_channels(uid,"schedtarget"))
+        k = inline_channels(uid, "schedtarget")
+        if not k.keyboard:
+            BOT.send_message(chat_id, "আপনার কোনো যুক্ত করা চ্যানেল পাওয়া যায়নি। আগে একটি চ্যানেল যুক্ত করুন।")
+        else:
+            set_state(uid,"schedule_target",{})
+            BOT.send_message(chat_id, "শিডিউল করার জন্য আপনার একটি চ্যানেল নির্বাচন করুন:", reply_markup=k)
         return
     
     if msg_text=="🛠 Admin panel" and is_admin(uid):
@@ -259,8 +277,8 @@ def text_router(m):
         BOT.send_message(chat_id,"\n".join(f"{r['user_id']} @{r['username'] or '-'} — {r['status']}" for r in rows) or "কোনো ব্যবহারকারী নেই"); return
     
     if is_admin(uid) and msg_text=="📡 Channel list":
-        rows=db("SELECT chat_id,title,username FROM channels ORDER BY title",fetch=True)
-        BOT.send_message(chat_id,"\n".join(f"{r['title']} | {r['chat_id']} | @{r['username'] or '-'}" for r in rows) or "কোনো চ্যানেল নেই"); return
+        rows=db("SELECT chat_id,title,username,added_by FROM channels ORDER BY title",fetch=True)
+        BOT.send_message(chat_id,"\n".join(f"{r['title']} | {r['chat_id']} | Added by: {r['added_by']}" for r in rows) or "কোনো চ্যানেল নেই"); return
     
     if is_admin(uid) and msg_text=="➕ Add admin":
         set_state(uid,"add_admin")
@@ -331,7 +349,7 @@ def text_router(m):
         try: 
             publish(data["chat_id"], data["body"], data.get("photo"), data.get("buttons", []), data.get("reaction"))
         except Exception as e: 
-            BOT.send_message(chat_id, f"পোস্ট পাঠানো ব্যর্থ হয়েছে: {e}")
+            BOT.send_message(chat_id, f"পোস্ট পাঠানো ব্যর্থ হয়েছে: {e}\n\nনিশ্চিত করুন বটকে চ্যানেলে পোস্ট করার পারমিশন সহ অ্যাডমিন বানিয়েছেন।")
             clear_state(uid)
             return
         clear_state(uid)
