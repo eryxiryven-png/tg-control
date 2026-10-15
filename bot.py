@@ -36,7 +36,7 @@ def init_db():
       """CREATE TABLE IF NOT EXISTS states(
         user_id BIGINT PRIMARY KEY, state TEXT, data JSONB NOT NULL DEFAULT '{}'::jsonb)""",
       """CREATE TABLE IF NOT EXISTS scheduled_posts(
-        id BIGSERIAL PRIMARY KEY, owner_id BIGINT, chat_id BIGINT, body TEXT,
+        id BIGSERIAL PRIMARY KEY, owner_id BIGINT, chat_id BIGINT, body TEXT, photo TEXT,
         buttons JSONB NOT NULL DEFAULT '[]'::jsonb, run_at TIMESTAMPTZ,
         reaction TEXT, status TEXT NOT NULL DEFAULT 'queued', created_at TIMESTAMPTZ DEFAULT NOW())"""
     ]
@@ -96,7 +96,7 @@ def send_home(chat_id, uid):
     welcome_text = tr(
         uid,
         "👋 Welcome to the Bot!\n\nHow to add a channel:\n1. Make this bot Admin in your channel.\n2. Forward ANY post from that channel to this bot OR send channel username (@username).\n\nChoose an option from the keyboard below:",
-        "👋 বট-এ আপনাকে স্বাগতম!\n\nচ্যানেল যেভাবে যুক্ত করবেন:\n১. বট-কে আপনার চ্যানেলে এডমিন বানান।\n২. চ্যানেল থেকে যেকোনো একটি পোস্ট বটের কাছে ফরওয়ার্ড করুন অথবা চ্যানেলের ইউজারনেম (@username) লিখে পাঠান।\n\nনিচের কিবোর্ড থেকে অপশন বেছে নিন:"
+        "👋 Bot-e apnake swagotom!\n\nChannel jevabe add korben:\n1. Bot-ke apnar channel-er Admin banan.\n2. Channel theke jekono post bot-er kache forward korun ba channel username (@username) pathan.\n\nNicher keyboard theke option bashun:"
     )
     BOT.send_message(chat_id, welcome_text, reply_markup=main_keyboard(uid))
 
@@ -121,7 +121,7 @@ def start(m):
        {"id":u.id,"un":u.username,"fn":u.first_name,"st":"approved" if u.id==ADMIN_ID else "pending"})
     
     if u.id != ADMIN_ID and user_status(u.id) == "pending":
-        BOT.send_message(m.chat.id, "👋 Welcome! Your access request has been sent to the admin.\nস্বাগতম! আপনার অনুমতির অনুরোধ অ্যাডমিনের কাছে পাঠানো হয়েছে।")
+        BOT.send_message(m.chat.id, "👋 Welcome! Your access request has been sent to the admin.\nSwagotom! Apnar onumotir request admin-er kache pathano hoyeche.")
         for aid in [x["user_id"] for x in db("SELECT user_id FROM admins", fetch=True)]:
             try:
                 k=types.InlineKeyboardMarkup()
@@ -133,16 +133,16 @@ def start(m):
 
     k = types.InlineKeyboardMarkup()
     k.row(types.InlineKeyboardButton("🇬🇧 English", callback_data="lang:en"),
-          types.InlineKeyboardButton("🇧🇩 বাংলা", callback_data="lang:bn"))
-    BOT.send_message(m.chat.id, "Please select your language / অনুগ্রহ করে আপনার ভাষা নির্বাচন করুন:", reply_markup=k)
+          types.InlineKeyboardButton("🇧🇩 Bangla", callback_data="lang:bn"))
+    BOT.send_message(m.chat.id, "Please select your language / Onugraho kore apnar bhasha nirbachon korun:", reply_markup=k)
 
 @BOT.message_handler(commands=["help"])
 def help_cmd(m):
     uid = m.from_user.id
     help_text = tr(
         uid,
-        "<b>Bot Manual & Usage Guide:</b>\n1. Make bot Admin in channel.\n2. Forward a post from channel or send @username here to add channel.\n3. Use keyboard buttons to create or schedule posts.",
-        "<b>বট ম্যানুয়াল ও ব্যবহারের নির্দেশিকা:</b>\n১. চ্যানেল-এ বটকে এডমিন বানান।\n২. চ্যানেল থেকে একটি পোস্ট বটের কাছে ফরওয়ার্ড করুন অথবা @username পাঠালেই চ্যানেল এড হয়ে যাবে।\n৩. পোস্ট তৈরি ও শিডিউল করতে নিচের বাটনগুলো ব্যবহার করুন।"
+        "<b>Bot Manual & Usage Guide:</b>\n1. Make bot Admin in channel.\n2. Forward a post from channel or send @username here to add channel.\n3. Use keyboard buttons to create photo/text posts with buttons and reactions.",
+        "<b>Bot Manual & Usage Guide:</b>\n1. Bot-ke channel-er admin banan.\n2. Channel theke post forward korun ba @username pathan.\n3. Keyboard button use kore photo/text post, button ebong reaction সহ post ba schedule korun."
     )
     BOT.send_message(m.chat.id, help_text, reply_markup=main_keyboard(uid))
 
@@ -157,31 +157,37 @@ def add_channel(m):
     else:
         BOT.reply_to(m, tr(m.from_user.id, 
             "Send channel @username OR forward any post from your channel to add it.",
-            "চ্যানেল যুক্ত করতে চ্যানেলের @username পাঠান অথবা চ্যানেল থেকে যেকোনো একটি পোস্ট ফরওয়ার্ড করুন।"))
+            "Channel add korte channel-er @username pathan ba channel theke jekono post forward korun."))
 
-# Handling Forwarded Messages from Channel
 @BOT.message_handler(func=lambda m: m.forward_from_chat is not None and m.forward_from_chat.type == 'channel')
 def handle_forwarded_channel_post(m):
     uid = m.from_user.id
     if not is_admin(uid) and user_status(uid) != "approved":
         return
-    
     channel_chat = m.forward_from_chat
     ok, msg = register_channel_by_chat_obj(channel_chat, uid)
     BOT.reply_to(m, msg, reply_markup=main_keyboard(uid))
 
-@BOT.message_handler(func=lambda m: True, content_types=["text"])
+@BOT.message_handler(func=lambda m: True, content_types=["text", "photo"])
 def text_router(m):
-    uid=m.from_user.id; chat_id=m.chat.id; msg=(m.text or "").strip()
+    uid=m.from_user.id; chat_id=m.chat.id; msg_text=(m.text or m.caption or "").strip()
     if not is_admin(uid) and user_status(uid) != "approved":
         BOT.send_message(chat_id, "Your access is not approved yet. Tap Help to contact admin.")
         return
     
     state,data=get_state(uid)
 
-    # Auto detect channel username (e.g. @mychannel or t.me/mychannel)
-    if msg.startswith("@") or "t.me/" in msg:
-        clean_username = msg.split("/")[-1] if "t.me/" in msg else msg
+    # Handle Photo Input during post creation or scheduling
+    if m.photo and state in ("post_body", "schedule_body"):
+        photo_file_id = m.photo[-1].file_id
+        data["photo"] = photo_file_id
+        data["body"] = msg_text
+        set_state(uid, state + "_buttons", data)
+        BOT.send_message(chat_id, "Photo received! Now send button links as: Button title | https://example.com\nSend NONE for no button. Multiple links: one per line.")
+        return
+
+    if msg_text.startswith("@") or "t.me/" in msg_text:
+        clean_username = msg_text.split("/")[-1] if "t.me/" in msg_text else msg_text
         try:
             target_chat = BOT.get_chat(clean_username)
             if target_chat.type == "channel":
@@ -189,89 +195,89 @@ def text_router(m):
                 BOT.send_message(chat_id, res_msg, reply_markup=main_keyboard(uid))
                 return
         except Exception as e:
-            BOT.send_message(chat_id, tr(uid, f"Could not find or access channel: {e}", f"চ্যানেলটি খুঁজে পাওয়া যায়নি অথবা বট এডমিন নেই: {e}"))
+            BOT.send_message(chat_id, tr(uid, f"Could not find or access channel: {e}", f"Channel khuje paoni ba bot admin nei: {e}"))
             return
 
-    if msg in ("🌐 Language", "🌐 ভাষা পরিবর্তন", "Language / ভাষা"):
+    if msg_text in ("🌐 Language", "🌐 ভাষা পরিবর্তন", "Language / ভাষা"):
         k=types.InlineKeyboardMarkup()
-        k.row(types.InlineKeyboardButton("English",callback_data="lang:en"),types.InlineKeyboardButton("বাংলা",callback_data="lang:bn"))
-        BOT.send_message(chat_id,"Choose language / ভাষা বেছে নিন",reply_markup=k); return
+        k.row(types.InlineKeyboardButton("English",callback_data="lang:en"),types.InlineKeyboardButton("Bangla",callback_data="lang:bn"))
+        BOT.send_message(chat_id,"Choose language / Bhasha bashun",reply_markup=k); return
     
-    if msg in ("➕ Add Channel", "➕ চ্যানেল যুক্ত করুন"):
+    if msg_text in ("➕ Add Channel", "➕ চ্যানেল যুক্ত করুন"):
         add_msg = tr(
             uid,
             "<b>How to add a channel:</b>\n1. Make this bot an Admin in your channel.\n2. Simply <b>forward any post</b> from that channel here OR send channel username (e.g. <code>@channelusername</code>).",
-            "<b>চ্যানেল যুক্ত করার নিয়ম:</b>\n১. বট-কে আপনার চ্যানেলে এডমিন বানান।\n২. চ্যানেল থেকে যেকোনো একটি <b>পোস্ট ফরওয়ার্ড করে এখানে পাঠান</b> অথবা চ্যানেলের ইউজারনেম (যেমন: <code>@channelusername</code>) লিখে পাঠান।"
+            "<b>Channel add korar niyom:</b>\n1. Bot-ke apnar channel-er Admin banan.\n2. Channel theke jekono <b>post forward korun</b> ba channel username (jemon: <code>@channelusername</code>) pathan."
         )
-        BOT.send_message(chat_id, add_msg)
+        BOT.send_message(chat_id, add_msg, parse_mode="HTML")
         return
 
-    if msg in ("🆘 Help", "🆘 সহায়তা / ম্যানুয়াল", "Help / Manual"):
+    if msg_text in ("🆘 Help", "🆘 সহায়তা / ম্যানুয়াল", "Help / Manual"):
         help_text = tr(
             uid,
             "<b>Bot Manual & Usage Guide:</b>\n- Forward channel post or send @username to add channel.\n- Use keyboard options to manage channels and schedule/create posts.",
-            "<b>বট ব্যবহারের নির্দেশিকা:</b>\n- চ্যানেল পোস্ট ফরওয়ার্ড করুন বা @username লিখে চ্যানেল এড করুন।\n- পোস্ট তৈরি বা শিডিউল করতে কিবোর্ড বাটনে চাপ দিন।"
+            "<b>Bot Manual & Usage Guide:</b>\n- Channel post forward korun ba @username diye channel add korun.\n- Post ba photo post create ba schedule korte keyboard button use korun."
         )
         set_state(uid,"help_message")
-        BOT.send_message(chat_id, help_text)
+        BOT.send_message(chat_id, help_text, parse_mode="HTML")
         return
 
     if state=="help_message":
         clear_state(uid)
         for aid in [x["user_id"] for x in db("SELECT user_id FROM admins", fetch=True)]:
-            try: BOT.send_message(aid,f"🆘 Help request from {uid} (@{m.from_user.username or 'none'}):\n{msg}")
+            try: BOT.send_message(aid,f"🆘 Help request from {uid} (@{m.from_user.username or 'none'}):\n{msg_text}")
             except Exception: pass
-        BOT.send_message(chat_id, tr(uid, "Message sent to admin.", "বার্তাটি অ্যাডমিনের কাছে পাঠানো হয়েছে।"), reply_markup=main_keyboard(uid))
+        BOT.send_message(chat_id, tr(uid, "Message sent to admin.", "Message admin-er kache pathano hoyeche."), reply_markup=main_keyboard(uid))
         return
 
-    if msg in ("📣 Channels", "📣 চ্যানেলসমূহ"):
-        BOT.send_message(chat_id, tr(uid, "Select a channel to manage:", "পরিচালনা করার জন্য একটি চ্যানেল নির্বাচন করুন:"), reply_markup=inline_channels(uid,"channel"))
+    if msg_text in ("📣 Channels", "📣 চ্যানেলসমূহ"):
+        BOT.send_message(chat_id, tr(uid, "Select a channel to manage:", "Manage korar jonno ekta channel select korun:"), reply_markup=inline_channels(uid,"channel"))
         return
     
-    if msg in ("📝 Create post", "📝 পোস্ট তৈরি"):
+    if msg_text in ("📝 Create post", "📝 পোস্ট তৈরি"):
         set_state(uid,"post_target",{})
-        BOT.send_message(chat_id, tr(uid, "Select a channel:", "একটি চ্যানেল নির্বাচন করুন:"), reply_markup=inline_channels(uid,"target"))
+        BOT.send_message(chat_id, tr(uid, "Select a channel:", "Ekta channel select korun:"), reply_markup=inline_channels(uid,"target"))
         return
     
-    if msg in ("⏰ Schedule post", "⏰ পোস্ট শিডিউল"):
+    if msg_text in ("⏰ Schedule post", "⏰ পোস্ট শিডিউল"):
         set_state(uid,"schedule_target",{})
-        BOT.send_message(chat_id, tr(uid, "Select a channel:", "একটি চ্যানেল নির্বাচন করুন:"), reply_markup=inline_channels(uid,"schedtarget"))
+        BOT.send_message(chat_id, tr(uid, "Select a channel:", "Ekta channel select korun:"), reply_markup=inline_channels(uid,"schedtarget"))
         return
     
-    if msg=="🛠 Admin panel" and is_admin(uid):
+    if msg_text=="🛠 Admin panel" and is_admin(uid):
         BOT.send_message(chat_id,"Admin control panel",reply_markup=admin_keyboard()); return
     
-    if msg in ("⬅️ Main menu", "মূল মেনু"):
+    if msg_text in ("⬅️ Main menu", "মূল মেনু"):
         send_home(chat_id,uid); return
         
-    if is_admin(uid) and msg=="📊 Statistics":
+    if is_admin(uid) and msg_text=="📊 Statistics":
         u=db("SELECT COUNT(*) n FROM users",fetch=True)[0]["n"]
         approved=db("SELECT COUNT(*) n FROM users WHERE status='approved'",fetch=True)[0]["n"]
         pending=db("SELECT COUNT(*) n FROM users WHERE status='pending'",fetch=True)[0]["n"]
         ch=db("SELECT COUNT(*) n FROM channels",fetch=True)[0]["n"]
         BOT.send_message(chat_id,f"📊 Statistics\nUsers: {u}\nApproved: {approved}\nPending: {pending}\nChannels: {ch}",reply_markup=admin_keyboard()); return
     
-    if is_admin(uid) and msg=="👥 User list":
+    if is_admin(uid) and msg_text=="👥 User list":
         rows=db("SELECT user_id,username,status FROM users ORDER BY joined_at DESC LIMIT 100",fetch=True)
         BOT.send_message(chat_id,"\n".join(f"{r['user_id']} @{r['username'] or '-'} — {r['status']}" for r in rows) or "No users"); return
     
-    if is_admin(uid) and msg=="📡 Channel list":
+    if is_admin(uid) and msg_text=="📡 Channel list":
         rows=db("SELECT chat_id,title,username FROM channels ORDER BY title",fetch=True)
         BOT.send_message(chat_id,"\n".join(f"{r['title']} | {r['chat_id']} | @{r['username'] or '-'}" for r in rows) or "No channels"); return
     
-    if is_admin(uid) and msg=="➕ Add admin":
+    if is_admin(uid) and msg_text=="➕ Add admin":
         set_state(uid,"add_admin")
         BOT.send_message(chat_id,"Send the numeric Telegram user ID to promote as admin.")
         return
     
     if is_admin(uid) and state=="add_admin":
         try:
-            new_id=int(msg); db("INSERT INTO admins(user_id) VALUES(:id) ON CONFLICT DO NOTHING",{"id":new_id})
+            new_id=int(msg_text); db("INSERT INTO admins(user_id) VALUES(:id) ON CONFLICT DO NOTHING",{"id":new_id})
             clear_state(uid); BOT.send_message(chat_id,f"✅ Admin added: {new_id}",reply_markup=admin_keyboard())
         except ValueError: BOT.send_message(chat_id,"Please send a numeric user ID.")
         return
     
-    if is_admin(uid) and msg=="✅ Pending users":
+    if is_admin(uid) and msg_text=="✅ Pending users":
         rows=db("SELECT user_id,username,first_name FROM users WHERE status='pending' ORDER BY joined_at",fetch=True)
         for r in rows:
             k=types.InlineKeyboardMarkup().row(types.InlineKeyboardButton("✅ Approve",callback_data=f"approve:{r['user_id']}"),types.InlineKeyboardButton("❌ Reject",callback_data=f"reject:{r['user_id']}"))
@@ -279,7 +285,7 @@ def text_router(m):
         if not rows: BOT.send_message(chat_id,"No pending users.")
         return
     
-    if is_admin(uid) and msg=="📨 Broadcast":
+    if is_admin(uid) and msg_text=="📨 Broadcast":
         set_state(uid,"broadcast")
         BOT.send_message(chat_id,"Send the text to broadcast to all approved bot users and registered channels.")
         return
@@ -287,23 +293,24 @@ def text_router(m):
     if is_admin(uid) and state=="broadcast":
         clear_state(uid); ok=0; fail=0
         for r in db("SELECT user_id FROM users WHERE status='approved'",fetch=True):
-            try: BOT.send_message(r["user_id"],msg); ok+=1
+            try: BOT.send_message(r["user_id"],msg_text); ok+=1
             except Exception: fail+=1
         for r in db("SELECT chat_id FROM channels",fetch=True):
-            try: BOT.send_message(r["chat_id"],msg); ok+=1
+            try: BOT.send_message(r["chat_id"],msg_text); ok+=1
             except Exception: fail+=1
         BOT.send_message(chat_id,f"Broadcast finished.\nSent: {ok}\nFailed: {fail}",reply_markup=admin_keyboard()); return
     
     if state in ("post_body","schedule_body"):
-        data["body"]=msg
-        set_state(uid,state+"_buttons",data)
-        BOT.send_message(chat_id,"Now send button links as: Button title | https://example.com\nSend NONE for no button. Multiple links: one per line.")
+        data["body"] = msg_text
+        data["photo"] = None  # Text only post
+        set_state(uid, state + "_buttons", data)
+        BOT.send_message(chat_id, "Now send button links as: Button title | https://example.com\nSend NONE for no button. Multiple links: one per line.")
         return
     
     if state in ("post_body_buttons","schedule_body_buttons"):
-        if msg.upper()!="NONE":
+        if msg_text.upper()!="NONE":
             try:
-                lines=msg.splitlines(); buttons=[]
+                lines=msg_text.splitlines(); buttons=[]
                 for line in lines:
                     title,url=[x.strip() for x in line.split("|",1)]
                     if not url.startswith(("https://","http://")): raise ValueError()
@@ -313,6 +320,7 @@ def text_router(m):
                 BOT.send_message(chat_id,"Invalid format. Use: Button title | https://example.com (one per line), or NONE.")
                 return
         else: data["buttons"]=[]
+        
         if state.startswith("schedule"):
             set_state(uid,"schedule_time",data)
             BOT.send_message(chat_id,"Send scheduled time in UTC, format YYYY-MM-DD HH:MM (example 2026-10-20 14:30).")
@@ -322,14 +330,20 @@ def text_router(m):
         return
     
     if state=="post_reaction":
-        data["reaction"]=None if msg.upper()=="NONE" else msg
-        try: publish(data["chat_id"],data["body"],data.get("buttons",[]),data.get("reaction"))
-        except Exception as e: BOT.send_message(chat_id,f"Post failed: {e}"); clear_state(uid); return
-        clear_state(uid); BOT.send_message(chat_id, tr(uid, "✅ Posted.", "✅ পোস্ট সফলভাবে পাঠানো হয়েছে।"), reply_markup=main_keyboard(uid)); return
+        data["reaction"]=None if msg_text.upper()=="NONE" else msg_text
+        try: 
+            publish(data["chat_id"], data["body"], data.get("photo"), data.get("buttons", []), data.get("reaction"))
+        except Exception as e: 
+            BOT.send_message(chat_id, f"Post failed: {e}")
+            clear_state(uid)
+            return
+        clear_state(uid)
+        BOT.send_message(chat_id, tr(uid, "✅ Posted successfully.", "✅ Post successfully pathano hoyeche."), reply_markup=main_keyboard(uid))
+        return
     
     if state=="schedule_time":
         try:
-            dt=datetime.strptime(msg,"%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+            dt=datetime.strptime(msg_text,"%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
             if dt <= datetime.now(timezone.utc): raise ValueError()
             data["run_at"]=dt.isoformat()
             set_state(uid,"schedule_reaction",data)
@@ -338,22 +352,27 @@ def text_router(m):
         return
     
     if state=="schedule_reaction":
-        reaction=None if msg.upper()=="NONE" else msg
-        db("""INSERT INTO scheduled_posts(owner_id,chat_id,body,buttons,run_at,reaction)
-          VALUES(:o,:c,:b,CAST(:btn AS jsonb),:rt,:re)""",
-          {"o":uid,"c":data["chat_id"],"b":data["body"],"btn":json.dumps(data.get("buttons",[])),"rt":data["run_at"],"re":reaction})
-        clear_state(uid); BOT.send_message(chat_id, tr(uid, "⏰ Scheduled successfully (UTC).", "⏰ সফলভাবে শিডিউল করা হয়েছে (UTC)।"), reply_markup=main_keyboard(uid)); return
+        reaction=None if msg_text.upper()=="NONE" else msg_text
+        db("""INSERT INTO scheduled_posts(owner_id,chat_id,body,photo,buttons,run_at,reaction)
+          VALUES(:o,:c,:b,:p,CAST(:btn AS jsonb),:rt,:re)""",
+          {"o":uid,"c":data["chat_id"],"b":data["body"],"p":data.get("photo"),"btn":json.dumps(data.get("buttons",[])),"rt":data["run_at"],"re":reaction})
+        clear_state(uid); BOT.send_message(chat_id, tr(uid, "⏰ Scheduled successfully (UTC).", "⏰ Successfully schedule kora hoyeche (UTC)."), reply_markup=main_keyboard(uid)); return
         
-    BOT.send_message(chat_id, tr(uid, "Use the keyboard to continue.", "চালিয়ে যেতে কিবোর্ড ব্যবহার করুন।"), reply_markup=main_keyboard(uid))
+    BOT.send_message(chat_id, tr(uid, "Use the keyboard to continue.", "Cholte thakte keyboard use korun."), reply_markup=main_keyboard(uid))
 
-def publish(chat_id, body, buttons=None, reaction=None):
+def publish(chat_id, body, photo=None, buttons=None, reaction=None):
     markup=None
     if buttons:
         markup=types.InlineKeyboardMarkup()
         for b in buttons: markup.add(types.InlineKeyboardButton(b["text"],url=b["url"]))
-    sent=BOT.send_message(chat_id,body,reply_markup=markup)
+    
+    if photo:
+        sent = BOT.send_photo(chat_id, photo, caption=body, reply_markup=markup)
+    else:
+        sent = BOT.send_message(chat_id, body, reply_markup=markup)
+        
     if reaction:
-        try: BOT.set_message_reaction(chat_id,sent.message_id,[types.ReactionTypeEmoji(emoji=reaction)])
+        try: BOT.set_message_reaction(chat_id, sent.message_id, [types.ReactionTypeEmoji(emoji=reaction)])
         except Exception: log.warning("Reaction could not be applied; check Bot API/library/channel permissions")
 
 @BOT.callback_query_handler(func=lambda c: True)
@@ -363,7 +382,7 @@ def callbacks(c):
         if data.startswith("lang:"):
             choice=data.split(":",1)[1]
             db("UPDATE users SET language=:l WHERE user_id=:id",{"l":choice,"id":uid})
-            BOT.answer_callback_query(c.id, "Language updated" if choice=="en" else "ভাষা আপডেট করা হয়েছে")
+            BOT.answer_callback_query(c.id, "Language updated" if choice=="en" else "Bhasha update kora hoyeche")
             send_home(c.message.chat.id, uid)
             return
             
@@ -372,22 +391,21 @@ def callbacks(c):
             status="approved" if action=="approve" else "rejected"
             db("UPDATE users SET status=:s WHERE user_id=:id",{"s":status,"id":target})
             BOT.answer_callback_query(c.id,status)
-            try: BOT.send_message(target,"✅ Access approved. Send /start to begin." if status=="approved" else "Your access request was rejected.")
+            try: BOT.send_message(target,"✅ Access approved. Send /start to begin." if status=="approved" else "Apnar access request reject kora hoyeche.")
             except Exception: pass
             BOT.edit_message_reply_markup(c.message.chat.id,c.message.message_id,reply_markup=None); return
             
         if ":" in data and data.split(":",1)[0] in ("channel","target","schedtarget"):
             action,chat=data.split(":",1); chat=int(chat)
-            state,_=get_state(uid)
             if action=="channel":
                 k=types.InlineKeyboardMarkup().row(types.InlineKeyboardButton("📝 Create post",callback_data=f"target:{chat}"),types.InlineKeyboardButton("⏰ Schedule",callback_data=f"schedtarget:{chat}"))
-                BOT.send_message(c.message.chat.id, tr(uid, "Channel selected:", "চ্যানেল নির্বাচিত হয়েছে:"), reply_markup=k)
+                BOT.send_message(c.message.chat.id, tr(uid, "Channel selected:", "Channel select kora hoyeche:"), reply_markup=k)
             elif action=="target":
                 set_state(uid,"post_body",{"chat_id":chat})
-                BOT.send_message(c.message.chat.id, tr(uid, "Send the post text now.", "এখন পোস্টের টেক্সট পাঠান।"))
+                BOT.send_message(c.message.chat.id, tr(uid, "Send text OR photo with caption now.", "Ekhon text ba caption shoho photo pathan."))
             else:
                 set_state(uid,"schedule_body",{"chat_id":chat})
-                BOT.send_message(c.message.chat.id, tr(uid, "Send the post text now.", "এখন পোস্টের টেক্সট পাঠান।"))
+                BOT.send_message(c.message.chat.id, tr(uid, "Send text OR photo with caption now.", "Ekhon text ba caption shoho photo pathan."))
             BOT.answer_callback_query(c.id); return
     except Exception as e:
         log.exception("callback error")
@@ -402,7 +420,7 @@ def run_scheduled():
             if not changed: continue
             try:
                 buttons=p["buttons"] if isinstance(p["buttons"],list) else json.loads(p["buttons"] or "[]")
-                publish(p["chat_id"],p["body"],buttons,p["reaction"])
+                publish(p["chat_id"], p["body"], p.get("photo"), buttons, p["reaction"])
                 db("UPDATE scheduled_posts SET status='sent' WHERE id=:id",{"id":p["id"]})
             except Exception:
                 log.exception("scheduled post failed")
