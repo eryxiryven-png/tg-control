@@ -1,0 +1,6 @@
+Flask==3.1.1
+pyTelegramBotAPI==4.28.0
+SQLAlchemy==2.0.41
+psycopg2-binary==2.9.10
+APScheduler==3.11.0
+gunicorn==23.0.0
