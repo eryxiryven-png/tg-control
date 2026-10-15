@@ -84,7 +84,6 @@ def admin_keyboard():
     k.row("⬅️ Main menu")
     return k
 
-# User based channel filtering
 def inline_channels(uid, action):
     if is_admin(uid):
         rows=db("SELECT chat_id,title,username FROM channels ORDER BY title", fetch=True)
@@ -186,7 +185,7 @@ def text_router(m):
         data["photo"] = photo_file_id
         data["body"] = msg_text
         set_state(uid, state + "_buttons", data)
-        BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম | https://example.com\nবাটন না চাইলে NONE লিখুন।")
+        BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম | https://example.com\nবাটন না থাকলে NONE লিখুন।")
         return
 
     if msg_text.startswith("@") or "t.me/" in msg_text:
@@ -301,20 +300,31 @@ def text_router(m):
         return
     
     if is_admin(uid) and msg_text=="📨 Broadcast":
-        set_state(uid,"broadcast")
-        BOT.send_message(chat_id,"সব ব্যবহারকারী এবং চ্যানেলে ব্রডকাস্ট করার জন্য মেসেজটি পাঠান।")
+        k = types.InlineKeyboardMarkup()
+        k.row(types.InlineKeyboardButton("👤 Bot Users Only", callback_data="bc:users"),
+              types.InlineKeyboardButton("📡 Channels Only", callback_data="bc:channels"))
+        k.row(types.InlineKeyboardButton("🌐 Both (Users & Channels)", callback_data="bc:both"))
+        BOT.send_message(chat_id, "কাদের মাঝে ব্রডকাস্ট পাঠাতে চান তা নির্বাচন করুন:", reply_markup=k)
         return
     
-    if is_admin(uid) and state=="broadcast":
-        clear_state(uid); ok=0; fail=0
-        for r in db("SELECT user_id FROM users WHERE status='approved'",fetch=True):
-            try: BOT.send_message(r["user_id"],msg_text); ok+=1
-            except Exception: fail+=1
-        for r in db("SELECT chat_id FROM channels",fetch=True):
-            try: BOT.send_message(r["chat_id"],msg_text); ok+=1
-            except Exception: fail+=1
-        BOT.send_message(chat_id,f"ব্রডকাস্ট সম্পন্ন হয়েছে!\nসফল: {ok}\nব্যর্থ: {fail}",reply_markup=admin_keyboard()); return
-    
+    if is_admin(uid) and state=="broadcast_text":
+        target = data.get("target", "both")
+        clear_state(uid)
+        ok=0; fail=0
+        
+        if target in ("users", "both"):
+            for r in db("SELECT user_id FROM users WHERE status='approved'",fetch=True):
+                try: BOT.send_message(r["user_id"], msg_text); ok+=1
+                except Exception: fail+=1
+                
+        if target in ("channels", "both"):
+            for r in db("SELECT chat_id FROM channels",fetch=True):
+                try: BOT.send_message(r["chat_id"], msg_text); ok+=1
+                except Exception: fail+=1
+                
+        BOT.send_message(chat_id, f"ব্রডকাস্ট সম্পন্ন হয়েছে!\nসফল: {ok}\nব্যর্থ: {fail}", reply_markup=admin_keyboard())
+        return
+
     if state in ("post_body","schedule_body"):
         data["body"] = msg_text
         data["photo"] = None
@@ -394,6 +404,13 @@ def publish(chat_id, body, photo=None, buttons=None, reaction=None):
 def callbacks(c):
     uid=c.from_user.id; data=c.data or ""
     try:
+        if data.startswith("bc:") and is_admin(uid):
+            target_type = data.split(":")[1] # users, channels, both
+            set_state(uid, "broadcast_text", {"target": target_type})
+            BOT.answer_callback_query(c.id, "Target selected")
+            BOT.send_message(c.message.chat.id, "এবার ব্রডকাস্ট করার জন্য আপনার বার্তাটি (টেক্সট বা ছবিসহ) পাঠান:")
+            return
+
         if data.startswith("lang:"):
             choice=data.split(":",1)[1]
             db("UPDATE users SET language=:l WHERE user_id=:id",{"l":choice,"id":uid})
