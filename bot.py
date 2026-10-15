@@ -16,7 +16,6 @@ BOT = telebot.TeleBot(TOKEN, parse_mode="HTML", threaded=True)
 app = Flask(__name__)
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
 
-# Conversation state is intentionally stored in PostgreSQL so restarts don't erase it.[cite: 1]
 def db(sql, params=None, fetch=False):
     with engine.begin() as conn:
         result = conn.execute(text(sql), params or {})
@@ -67,13 +66,13 @@ def tr(uid, en, bn):
 def main_keyboard(uid):
     k=types.ReplyKeyboardMarkup(resize_keyboard=True)
     if lang(uid) == "bn":
-        k.row("📣 চ্যানেলসমূহ", "📝 পোস্ট তৈরি")
-        k.row("⏰ পোস্ট শিডিউল", "🌐 ভাষা পরিবর্তন")
-        k.row("🆘 সহায়তা / ম্যানুয়াল")
+        k.row("📣 চ্যানেলসমূহ", "➕ চ্যানেল যুক্ত করুন")
+        k.row("📝 পোস্ট তৈরি", "⏰ পোস্ট শিডিউল")
+        k.row("🌐 ভাষা পরিবর্তন", "🆘 সহায়তা / ম্যানুয়াল")
     else:
-        k.row("📣 Channels", "📝 Create post")
-        k.row("⏰ Schedule post", "🌐 Language")
-        k.row("🆘 Help / Manual")
+        k.row("📣 Channels", "➕ Add Channel")
+        k.row("📝 Create post", "⏰ Schedule post")
+        k.row("🌐 Language", "🆘 Help / Manual")
     if is_admin(uid): k.row("🛠 Admin panel")
     return k
 
@@ -96,10 +95,23 @@ def inline_channels(uid, action):
 def send_home(chat_id, uid):
     welcome_text = tr(
         uid,
-        "👋 Welcome to the Bot!\n\nHere is how to use this bot:\n1. <b>Channels</b>: Register your channel by adding this bot as admin and sending /addchannel in the channel.\n2. <b>Create post</b>: Instantly send text, buttons, and reactions to your channels.\n3. <b>Schedule post</b>: Schedule posts for a specific time in UTC.\n4. <b>Help</b>: Contact the administrator.\n\nChoose an option from the keyboard below:",
-        "👋 বড্ডে আপনাকে স্বাগতম!\n\nবটটি যেভাবে ব্যবহার করবেন:\n1. <b>চ্যানেলসমূহ</b>: বটকে চ্যানেলে অ্যাডমিন বানিয়ে চ্যানেলের ভেতরে /addchannel লিখে চ্যানেল রেজিস্টার করুন।\n2. <b>পোস্ট তৈরি</b>: তাৎক্ষণিকভাবে চ্যানেলগুলোতে টেক্সট, বাটন ও রিঅ্যাকশনসহ পোস্ট পাঠান।\n3. <b>পোস্ট শিডিউল</b>: নির্দিষ্ট UTC সময়ে পোস্ট পাঠানোর জন্য শিডিউল করুন।\n4. <b>সহায়তা</b>: অ্যাডমিনের সাথে যোগাযোগ করুন।\n\nনিচের কিবোর্ড থেকে একটি অপশন বেছে নিন:"
+        "👋 Welcome to the Bot!\n\nHow to add a channel:\n1. Make this bot Admin in your channel.\n2. Forward ANY post from that channel to this bot OR send channel username (@username).\n\nChoose an option from the keyboard below:",
+        "👋 বট-এ আপনাকে স্বাগতম!\n\nচ্যানেল যেভাবে যুক্ত করবেন:\n১. বট-কে আপনার চ্যানেলে এডমিন বানান।\n২. চ্যানেল থেকে যেকোনো একটি পোস্ট বটের কাছে ফরওয়ার্ড করুন অথবা চ্যানেলের ইউজারনেম (@username) লিখে পাঠান।\n\nনিচের কিবোর্ড থেকে অপশন বেছে নিন:"
     )
     BOT.send_message(chat_id, welcome_text, reply_markup=main_keyboard(uid))
+
+def register_channel_by_chat_obj(chat_obj, added_by_user_id):
+    try:
+        bot_member = BOT.get_chat_member(chat_obj.id, BOT.get_me().id)
+        if bot_member.status not in ['administrator', 'creator']:
+            return False, "Bot is not an administrator in this channel. Please promote the bot first."
+        
+        db("""INSERT INTO channels(chat_id,title,username,added_by) VALUES(:id,:t,:u,:by)
+        ON CONFLICT(chat_id) DO UPDATE SET title=EXCLUDED.title,username=EXCLUDED.username""",
+        {"id":chat_obj.id,"t":chat_obj.title,"u":chat_obj.username,"by":added_by_user_id})
+        return True, f"✅ Channel <b>{chat_obj.title}</b> successfully added!"
+    except Exception as e:
+        return False, f"Could not access channel: {str(e)}"
 
 @BOT.message_handler(commands=["start"])
 def start(m):
@@ -119,7 +131,6 @@ def start(m):
             except Exception: log.exception("admin notification failed")
         return
 
-    # First time /start triggers language selection
     k = types.InlineKeyboardMarkup()
     k.row(types.InlineKeyboardButton("🇬🇧 English", callback_data="lang:en"),
           types.InlineKeyboardButton("🇧🇩 বাংলা", callback_data="lang:bn"))
@@ -130,27 +141,34 @@ def help_cmd(m):
     uid = m.from_user.id
     help_text = tr(
         uid,
-        "<b>Bot Manual & Usage Guide:</b>\n- Use the keyboard to manage channels, create posts, add URL buttons, schedule posts, and contact the admin.\n- The bot must be an administrator in each channel with posting permissions.\n- Use /addchannel inside your channel after promoting the bot.",
-        "<b>বট ম্যানুয়াল ও ব্যবহারের নির্দেশিকা:</b>\n- চ্যানেল ম্যানেজ, পোস্ট তৈরি, URL বাটন যুক্ত করা, শিডিউল এবং অ্যাডমিনের সাথে যোগাযোগের জন্য কিবোর্ড ব্যবহার করুন।\n- পোস্ট করার জন্য বটকে অবশ্যই প্রতিটি চ্যানেলের অ্যাডমিন হতে হবে।\n- বটকে অ্যাডমিন বানানোর পর চ্যানেলের ভেতরে /addchannel কমান্ড দিন।"
+        "<b>Bot Manual & Usage Guide:</b>\n1. Make bot Admin in channel.\n2. Forward a post from channel or send @username here to add channel.\n3. Use keyboard buttons to create or schedule posts.",
+        "<b>বট ম্যানুয়াল ও ব্যবহারের নির্দেশিকা:</b>\n১. চ্যানেল-এ বটকে এডমিন বানান।\n২. চ্যানেল থেকে একটি পোস্ট বটের কাছে ফরওয়ার্ড করুন অথবা @username পাঠালেই চ্যানেল এড হয়ে যাবে।\n৩. পোস্ট তৈরি ও শিডিউল করতে নিচের বাটনগুলো ব্যবহার করুন।"
     )
     BOT.send_message(m.chat.id, help_text, reply_markup=main_keyboard(uid))
 
-@BOT.message_handler(content_types=["new_chat_members"])
-def added_to_group(m):
-    pass
-
 @BOT.message_handler(commands=["addchannel"])
 def add_channel(m):
-    if m.chat.type == "private":
-        BOT.reply_to(m, "Run /addchannel inside the target channel after making this bot an administrator.")
+    if m.chat.type != "private":
+        try:
+            chat=BOT.get_chat(m.chat.id)
+            ok, msg = register_channel_by_chat_obj(chat, m.from_user.id)
+            BOT.reply_to(m, msg)
+        except Exception as e: BOT.reply_to(m, f"Error: {e}")
+    else:
+        BOT.reply_to(m, tr(m.from_user.id, 
+            "Send channel @username OR forward any post from your channel to add it.",
+            "চ্যানেল যুক্ত করতে চ্যানেলের @username পাঠান অথবা চ্যানেল থেকে যেকোনো একটি পোস্ট ফরওয়ার্ড করুন।"))
+
+# Handling Forwarded Messages from Channel
+@BOT.message_handler(func=lambda m: m.forward_from_chat is not None and m.forward_from_chat.type == 'channel')
+def handle_forwarded_channel_post(m):
+    uid = m.from_user.id
+    if not is_admin(uid) and user_status(uid) != "approved":
         return
-    try:
-        chat=BOT.get_chat(m.chat.id)
-        db("""INSERT INTO channels(chat_id,title,username,added_by) VALUES(:id,:t,:u,:by)
-        ON CONFLICT(chat_id) DO UPDATE SET title=EXCLUDED.title,username=EXCLUDED.username""",
-        {"id":chat.id,"t":chat.title,"u":chat.username,"by":m.from_user.id})
-        BOT.reply_to(m, "✅ Channel registered. You can now select it from the bot menu.")
-    except Exception as e: BOT.reply_to(m, f"Could not register channel: {e}")
+    
+    channel_chat = m.forward_from_chat
+    ok, msg = register_channel_by_chat_obj(channel_chat, uid)
+    BOT.reply_to(m, msg, reply_markup=main_keyboard(uid))
 
 @BOT.message_handler(func=lambda m: True, content_types=["text"])
 def text_router(m):
@@ -158,18 +176,41 @@ def text_router(m):
     if not is_admin(uid) and user_status(uid) != "approved":
         BOT.send_message(chat_id, "Your access is not approved yet. Tap Help to contact admin.")
         return
-    state,data=get_state(uid)
     
+    state,data=get_state(uid)
+
+    # Auto detect channel username (e.g. @mychannel or t.me/mychannel)
+    if msg.startswith("@") or "t.me/" in msg:
+        clean_username = msg.split("/")[-1] if "t.me/" in msg else msg
+        try:
+            target_chat = BOT.get_chat(clean_username)
+            if target_chat.type == "channel":
+                ok, res_msg = register_channel_by_chat_obj(target_chat, uid)
+                BOT.send_message(chat_id, res_msg, reply_markup=main_keyboard(uid))
+                return
+        except Exception as e:
+            BOT.send_message(chat_id, tr(uid, f"Could not find or access channel: {e}", f"চ্যানেলটি খুঁজে পাওয়া যায়নি অথবা বট এডমিন নেই: {e}"))
+            return
+
     if msg in ("🌐 Language", "🌐 ভাষা পরিবর্তন", "Language / ভাষা"):
         k=types.InlineKeyboardMarkup()
         k.row(types.InlineKeyboardButton("English",callback_data="lang:en"),types.InlineKeyboardButton("বাংলা",callback_data="lang:bn"))
         BOT.send_message(chat_id,"Choose language / ভাষা বেছে নিন",reply_markup=k); return
     
+    if msg in ("➕ Add Channel", "➕ চ্যানেল যুক্ত করুন"):
+        add_msg = tr(
+            uid,
+            "<b>How to add a channel:</b>\n1. Make this bot an Admin in your channel.\n2. Simply <b>forward any post</b> from that channel here OR send channel username (e.g. <code>@channelusername</code>).",
+            "<b>চ্যানেল যুক্ত করার নিয়ম:</b>\n১. বট-কে আপনার চ্যানেলে এডমিন বানান।\n২. চ্যানেল থেকে যেকোনো একটি <b>পোস্ট ফরওয়ার্ড করে এখানে পাঠান</b> অথবা চ্যানেলের ইউজারনেম (যেমন: <code>@channelusername</code>) লিখে পাঠান।"
+        )
+        BOT.send_message(chat_id, add_msg)
+        return
+
     if msg in ("🆘 Help", "🆘 সহায়তা / ম্যানুয়াল", "Help / Manual"):
         help_text = tr(
             uid,
-            "<b>Bot Manual & Usage Guide:</b>\n- Use the keyboard options to manage channels and schedule/create posts.\n- Send your message here if you want to contact the admin.",
-            "<b>বট ব্যবহারের নির্দেশিকা:</b>\n- চ্যানেল ম্যানেজ ও পোস্ট শিডিউল/তৈরি করতে কিবোর্ড অপশন ব্যবহার করুন।\n- অ্যাডমিনকে কোনো বার্তা পাঠাতে চাইলে সরাসরি লিখে পাঠান।"
+            "<b>Bot Manual & Usage Guide:</b>\n- Forward channel post or send @username to add channel.\n- Use keyboard options to manage channels and schedule/create posts.",
+            "<b>বট ব্যবহারের নির্দেশিকা:</b>\n- চ্যানেল পোস্ট ফরওয়ার্ড করুন বা @username লিখে চ্যানেল এড করুন।\n- পোস্ট তৈরি বা শিডিউল করতে কিবোর্ড বাটনে চাপ দিন।"
         )
         set_state(uid,"help_message")
         BOT.send_message(chat_id, help_text)
@@ -350,7 +391,7 @@ def callbacks(c):
             BOT.answer_callback_query(c.id); return
     except Exception as e:
         log.exception("callback error")
-        try: BOT.answer_callback_query(c.id,str(e)[:180],show_align=True)
+        try: BOT.answer_callback_query(c.id,str(e)[:180],show_alert=True)
         except Exception: pass
 
 def run_scheduled():
