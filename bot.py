@@ -185,7 +185,7 @@ def text_router(m):
         data["photo"] = photo_file_id
         data["body"] = msg_text
         set_state(uid, state + "_buttons", data)
-        BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম - https://example.com\nবাটন না থাকলে NONE লিখুন।")
+        BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম | https://example.com\nবাটন না থাকলে NONE লিখুন।")
         return
 
     if msg_text.startswith("@") or "t.me/" in msg_text:
@@ -329,7 +329,7 @@ def text_router(m):
         data["body"] = msg_text
         data["photo"] = None
         set_state(uid, state + "_buttons", data)
-        BOT.send_message(chat_id, "এবার বাটনের লিংক পাঠান এই ফরম্যাটে:\nবাটনের নাম - https://example.com\nবাটন না থাকলে NONE লিখুন।")
+        BOT.send_message(chat_id, "এবার বাটনের লিংক পাঠান এই ফরম্যাটে:\nবাটনের নাম | https://example.com\nবাটন না থাকলে NONE লিখুন।")
         return
     
     if state in ("post_body_buttons","schedule_body_buttons"):
@@ -342,7 +342,7 @@ def text_router(m):
                     buttons.append({"text":title,"url":url})
                 data["buttons"]=buttons
             except Exception:
-                BOT.send_message(chat_id,"ভুল ফরম্যাট! সঠিক নিয়মে দিন: বাটনের নাম - https://example.com অথবা NONE")
+                BOT.send_message(chat_id,"ভুল ফরম্যাট! সঠিক নিয়মে দিন: বাটনের নাম | https://example.com অথবা NONE")
                 return
         else: data["buttons"]=[]
         
