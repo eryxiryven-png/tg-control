@@ -1,15 +1,16 @@
-import os, json, logging, threading, time
+[cite: 1]import os, json, logging, threading, time
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 import telebot
 from telebot import types
 from sqlalchemy import create_engine, text
 from apscheduler.schedulers.background import BackgroundScheduler
+import re
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("controller")
 
-TOKEN = os.environ["BOT_TOKEN"]  # Keep token in Render Environment, not in GitHub code.[cite: 1]
+TOKEN = os.environ["BOT_TOKEN"] [cite: 1]
 ADMIN_ID = 6913254882
 DATABASE_URL = os.environ["DATABASE_URL"].replace("postgres://", "postgresql://", 1)
 BOT = telebot.TeleBot(TOKEN, parse_mode="HTML", threaded=True)
@@ -62,6 +63,32 @@ def lang(uid):
     return r[0]["language"] if r else "bn"
 def tr(uid, en, bn):
     return bn if lang(uid) == "bn" else en
+
+def format_colored_links(text_body):
+    # Regex to match patterns like: LABEL - URL - style:color
+    # Example: JOIN LINK - https://dbbt.me/ALPHA07 - style:green
+    pattern = re.compile(r'(.+?)\s*-\s*(https?://\S+)\s*-\s*style:([a-zA-Z]+)', re.IGNORECASE)
+    
+    def replace_match(match):
+        label = match.group(1).strip()
+        url = match.group(2).strip()
+        color_style = match.group(3).lower()
+        
+        # Telegram HTML supports limited tags. We can use emojis or formatting blockquotes/code/links.
+        # Let's map styles to visual HTML tags or beautiful indicators:
+        if color_style == 'green':
+            return f"🟢 <b><a href='{url}'>{label}</a></b>"
+        elif color_style == 'blue':
+            return f"🔵 <b><a href='{url}'>{label}</a></b>"
+        elif color_style == 'red':
+            return f"🔴 <b><a href='{url}'>{label}</a></b>"
+        elif color_style == 'yellow':
+            return f"🟡 <b><a href='{url}'>{label}</a></b>"
+        else:
+            return f"🔗 <a href='{url}'>{label}</a>"
+
+    formatted_text = pattern.sub(replace_match, text_body)
+    return formatted_text
 
 def main_keyboard(uid):
     k=types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -183,7 +210,7 @@ def text_router(m):
     if m.photo and state in ("post_body", "schedule_body"):
         photo_file_id = m.photo[-1].file_id
         data["photo"] = photo_file_id
-        data["body"] = msg_text
+        data["body"] = format_colored_links(msg_text)
         set_state(uid, state + "_buttons", data)
         BOT.send_message(chat_id, "ছবি পাওয়া গেছে! এবার বাটনের লিংক এই ফরম্যাটে দিন:\nবাটনের নাম | https://example.com\nবাটন না থাকলে NONE লিখুন।")
         return
@@ -326,7 +353,7 @@ def text_router(m):
         return
 
     if state in ("post_body","schedule_body"):
-        data["body"] = msg_text
+        data["body"] = format_colored_links(msg_text)
         data["photo"] = None
         set_state(uid, state + "_buttons", data)
         BOT.send_message(chat_id, "এবার বাটনের লিংক পাঠান এই ফরম্যাটে:\nবাটনের নাম | https://example.com\nবাটন না থাকলে NONE লিখুন।")
@@ -405,7 +432,7 @@ def callbacks(c):
     uid=c.from_user.id; data=c.data or ""
     try:
         if data.startswith("bc:") and is_admin(uid):
-            target_type = data.split(":")[1] # users, channels, both
+            target_type = data.split(":")[1]
             set_state(uid, "broadcast_text", {"target": target_type})
             BOT.answer_callback_query(c.id, "Target selected")
             BOT.send_message(c.message.chat.id, "এবার ব্রডকাস্ট করার জন্য আপনার বার্তাটি (টেক্সট বা ছবিসহ) পাঠান:")
